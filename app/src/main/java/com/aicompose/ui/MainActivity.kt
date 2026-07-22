@@ -37,14 +37,6 @@ import com.aicompose.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
-    private val screenCaptureLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            // 权限获取成功，由 ViewModel 处理
-        }
-    }
-
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
@@ -61,15 +53,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(
                 colorScheme = darkColorScheme()
             ) {
-                MainScreen(
-                    onRequestCapture = {
-                        val projectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                        screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
-                    },
-                    onCaptureResult = { resultCode, data ->
-                        // 由 Composable 内部处理
-                    }
-                )
+                MainScreen()
             }
         }
     }
@@ -77,9 +61,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen(
-    viewModel: MainViewModel = viewModel(),
-    onRequestCapture: () -> Unit,
-    onCaptureResult: (Int, Intent?) -> Unit
+    viewModel: MainViewModel = viewModel()
 ) {
     val accessibilityEnabled by viewModel.accessibilityEnabled.collectAsState()
     val captureRunning by viewModel.captureRunning.collectAsState()
@@ -179,7 +161,7 @@ fun MainScreen(
                 icon = Icons.Default.ScreenShare,
                 isEnabled = captureRunning,
                 buttonText = if (captureRunning) "运行中 ✓" else "开启",
-                onClick = { viewModel.requestScreenCapture(ActivityResultContracts.StartActivityForResult().let { screenCaptureLauncher }) },
+                onClick = { viewModel.toggleCapture() },
                 enabled = accessibilityEnabled
             )
 
@@ -473,7 +455,7 @@ fun AnalysisResultCard(result: com.aicompose.ai.CompositionEngine.AnalysisResult
                 ) {
                     Text(name, color = Color(0xFFB0BEC5), fontSize = 13.sp, modifier = Modifier.width(70.dp))
                     LinearProgressIndicator(
-                        progress = { value },
+                        progress = value,
                         modifier = Modifier
                             .weight(1f)
                             .height(8.dp)

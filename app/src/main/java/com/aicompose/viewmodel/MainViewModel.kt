@@ -84,6 +84,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * 切换屏幕捕获状态
+     */
+    fun toggleCapture() {
+        if (_captureRunning.value) {
+            context.stopService(Intent(context, ScreenCaptureService::class.java))
+            _captureRunning.value = false
+            _statusMessage.value = "屏幕捕获已停止"
+        } else {
+            _statusMessage.value = "请从主界面开启屏幕捕获"
+        }
+    }
+
+    /**
      * 屏幕捕获权限回调
      */
     fun onScreenCaptureResult(resultCode: Int, data: Intent?) {
