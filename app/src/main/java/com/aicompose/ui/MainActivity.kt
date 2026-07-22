@@ -67,7 +67,7 @@ fun Screen(vm: VM) {
     val a11y by vm.a11y.collectAsState()
     val cap by vm.capturing.collectAsState()
     val ai by vm.analyzing.collectAsState()
-    val ov by vm.overlay.collectAsState()
+    val ov by vm.overlayVisible.collectAsState()
     val auto by vm.autoExec.collectAsState()
     val res by vm.result.collectAsState()
     val status by vm.status.collectAsState()
@@ -100,7 +100,7 @@ fun Screen(vm: VM) {
             Step(1, "启用无障碍服务", "模拟触控操作小米相机", Icons.Default.Accessibility, a11y, { vm.openA11ySettings() })
             Step(2, "开启屏幕捕获", "捕取实时画面供AI分析", Icons.Default.ScreenShare, cap, { vm.requestCapture() }, a11y)
             Step(3, "AI 实时分析", "构图评分+法则检测+建议", Icons.Default.AutoAwesome, ai, {
-                if (ai) { vm.analyzing.value = false } else vm.onCaptureResult(0, Intent()) // toggle
+                if (ai) vm.stopAnalysis() else vm.requestCapture()
             }, cap)
             Step(4, "显示 AR 叠加层", "构图网格+评分+引导线", Icons.Default.Layers, ov, { vm.toggleOverlay() }, ai)
 
