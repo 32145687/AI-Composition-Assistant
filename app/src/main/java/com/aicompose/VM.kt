@@ -3,6 +3,7 @@ package com.aicompose
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.provider.Settings
@@ -13,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.aicompose.ai.CompositionEngine
 import com.aicompose.ai.CompositionResult
 import com.aicompose.ai.TFLiteScorer
+import com.aicompose.ar.SceneTracker
 import com.aicompose.gesture.GestureExecutor
 import com.aicompose.overlay.OverlayManager
 import com.aicompose.service.A11yService
@@ -27,15 +29,18 @@ import kotlinx.coroutines.withContext
 class VM(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG = "VM"
-        private const val ANALYSIS_INTERVAL_MS = 600L
+        private const val ANALYSIS_INTERVAL_MS = 500L
     }
 
     private val ctx: Context = app.applicationContext
     private val tfliteScorer = TFLiteScorer(ctx)
     private val engine = CompositionEngine(tfliteScorer)
+    private val sceneTracker = SceneTracker()
     private var launcher: ActivityResultLauncher<Intent>? = null
 
-    // 状态
+    // 累计场景运动
+    private var totalMotionX = 0f; private var totalMotionY = 0f
+
     val a11y = MutableStateFlow(false)
     val capturing = MutableStateFlow(false)
     val analyzing = MutableStateFlow(false)
@@ -46,133 +51,97 @@ class VM(app: Application) : AndroidViewModel(app) {
     val lastAction = MutableStateFlow<String?>(null)
 
     fun setLauncher(l: ActivityResultLauncher<Intent>) { launcher = l }
-
     fun checkA11y() { a11y.value = A11yService.instance != null }
 
-    fun getAIStatus(): String {
-        return if (tfliteScorer.isAvailable) "🧠 TFLite 深度学习 + 算法混合" else "📊 纯算法分析（放入模型文件启用DL）"
-    }
+    fun getAIStatus() = if (tfliteScorer.isAvailable) "🧠 TFLite + 算法混合" else "📊 纯算法"
 
     fun openA11ySettings() {
         ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    /**
-     * 请求屏幕捕获权限
-     */
     fun requestCapture() {
-        val l = launcher
-        if (l == null) { status.value = "系统未就绪，请稍后"; return }
+        val l = launcher ?: run { status.value = "系统未就绪"; return }
         try {
             val pm = ctx.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             l.launch(pm.createScreenCaptureIntent())
-            status.value = "请在弹窗中允许屏幕捕获"
-        } catch (e: Exception) {
-            Log.e(TAG, "请求屏幕捕获失败", e)
-            status.value = "请求权限失败: ${e.message}"
-        }
+            status.value = "请允许屏幕捕获"
+        } catch (e: Exception) { status.value = "请求失败: ${e.message}" }
     }
 
-    /**
-     * 屏幕捕获权限回调
-     */
     fun onCaptureResult(code: Int, data: Intent) {
-        Log.d(TAG, "屏幕捕获权限获取成功")
-        CaptureService.resultCode = code
-        CaptureService.resultData = data
-
+        CaptureService.resultCode = code; CaptureService.resultData = data
         try {
             val intent = Intent(ctx, CaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ctx.startForegroundService(intent)
-            } else {
-                ctx.startService(intent)
-            }
-            capturing.value = true
-            status.value = "屏幕捕获已启动"
-            // 自动启动 AI 分析
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(intent)
+            else ctx.startService(intent)
+            capturing.value = true; status.value = "屏幕捕获已启动"
             startAnalysis()
-        } catch (e: Exception) {
-            Log.e(TAG, "启动捕获服务失败", e)
-            status.value = "启动失败: ${e.message}"
-        }
+        } catch (e: Exception) { status.value = "启动失败: ${e.message}" }
     }
 
     private fun startAnalysis() {
         if (analyzing.value) return
-        analyzing.value = true
-        status.value = "AI 分析运行中..."
+        analyzing.value = true; status.value = "AI + AR 分析运行中..."
 
         // 分析循环
         viewModelScope.launch(Dispatchers.Default) {
             while (isActive && analyzing.value) {
                 delay(ANALYSIS_INTERVAL_MS)
-                val bmp = CaptureService.frameQueue.poll()
-                if (bmp != null) {
-                    try {
-                        val r = engine.analyze(bmp)
-                        result.value = r
-                        // 更新叠加层
-                        OverlayManager.update(r)
-                        // 自动执行调整
-                        if (autoExec.value) autoAdjust(r)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "分析异常", e)
-                    } finally {
-                        bmp.recycle()
-                    }
-                }
+                val bmp = CaptureService.frameQueue.poll() ?: continue
+                try {
+                    // 1. 构图分析
+                    val r = engine.analyze(bmp)
+
+                    // 2. 场景跟踪（用于 AR 跟随）
+                    val smallW = 160; val smallH = (bmp.height.toFloat() / bmp.width * smallW).toInt()
+                    val small = Bitmap.createScaledBitmap(bmp, smallW, smallH.coerceAtLeast(1), true)
+                    val pixels = IntArray(smallW * smallH)
+                    small.getPixels(pixels, 0, smallW, 0, 0, smallW, smallH)
+                    val motion = sceneTracker.trackFrame(pixels, smallW, smallH)
+                    small.recycle()
+
+                    // 3. 累计运动偏移
+                    totalMotionX += motion.dx * 2f  // 放大系数，增强跟随感
+                    totalMotionY += motion.dy * 2f
+                    // 衰减，防止无限漂移
+                    totalMotionX *= 0.95f; totalMotionY *= 0.95f
+
+                    // 4. 更新叠加层
+                    result.value = r
+                    OverlayManager.update(r)
+                    OverlayManager.updateMotion(totalMotionX, totalMotionY)
+
+                    // 5. 自动调整
+                    if (autoExec.value) autoAdjust(r)
+                } catch (e: Exception) { Log.e(TAG, "分析异常", e) }
+                finally { bmp.recycle() }
             }
         }
 
-        // 手势状态
-        viewModelScope.launch {
-            GestureExecutor.lastAction.collect { lastAction.value = it }
-        }
+        viewModelScope.launch { GestureExecutor.lastAction.collect { lastAction.value = it } }
     }
 
     private fun autoAdjust(r: CompositionResult) {
         val s = r.subject ?: return
         val area = (s.right - s.left) * (s.bottom - s.top)
-        // 主体太小 → 放大
-        if (area < 0.1f && r.rules[0].score < 0.5f) {
-            GestureExecutor.execute("zoom_in:0.4")
-        }
-        // 主体太大 → 缩小
-        if (area > 0.65f && r.rules[0].score < 0.5f) {
-            GestureExecutor.execute("zoom_out:0.3")
-        }
+        if (area < 0.1f && r.rules[0].score < 0.5f) GestureExecutor.execute("zoom_in:0.4")
+        if (area > 0.65f && r.rules[0].score < 0.5f) GestureExecutor.execute("zoom_out:0.3")
     }
 
     fun toggleOverlay() {
-        if (overlayVisible.value) {
-            OverlayManager.hide()
-            overlayVisible.value = false
-        } else {
-            OverlayManager.show(ctx)
-            overlayVisible.value = true
-        }
+        if (overlayVisible.value) { OverlayManager.hide(); overlayVisible.value = false }
+        else { OverlayManager.show(ctx); overlayVisible.value = true }
     }
 
     fun cycleGuide() { OverlayManager.cycleGuide() }
-
-    fun toggleAutoExec() {
-        autoExec.value = !autoExec.value
-        GestureExecutor.autoExecute = autoExec.value
-    }
-
-    fun stopAnalysis() {
-        analyzing.value = false
-        status.value = "AI 分析已停止"
-    }
-
+    fun toggleAutoExec() { autoExec.value = !autoExec.value; GestureExecutor.autoExecute = autoExec.value }
+    fun stopAnalysis() { analyzing.value = false; status.value = "AI 分析已停止" }
     fun getStats() = GestureExecutor.getStats()
 
     override fun onCleared() {
         super.onCleared()
-        analyzing.value = false
-        OverlayManager.hide()
-        GestureExecutor.destroy()
+        analyzing.value = false; OverlayManager.hide(); GestureExecutor.destroy()
+        tfliteScorer.close()
         try { ctx.stopService(Intent(ctx, CaptureService::class.java)) } catch (_: Exception) {}
     }
 }
