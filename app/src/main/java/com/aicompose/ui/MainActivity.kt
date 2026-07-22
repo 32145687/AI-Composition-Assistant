@@ -67,6 +67,7 @@ fun Screen(vm: VM) {
     val a11y by vm.a11y.collectAsState()
     val cap by vm.capturing.collectAsState()
     val ai by vm.analyzing.collectAsState()
+    val ovPerm by vm.overlayPermission.collectAsState()
     val ov by vm.overlayVisible.collectAsState()
     val auto by vm.autoExec.collectAsState()
     val res by vm.result.collectAsState()
@@ -75,7 +76,12 @@ fun Screen(vm: VM) {
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) vm.checkA11y() }
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) {
+                vm.checkA11y()
+                vm.checkOverlayPerm()
+            }
+        }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
@@ -91,7 +97,8 @@ fun Screen(vm: VM) {
 
             // 状态指示器
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-                Chip("无障碍", a11y); Chip("捕获", cap); Chip("AI", ai); Chip("叠加层", ov)
+                Chip("无障碍", a11y); Chip("捕获", cap); Chip("AI", ai)
+                Chip("悬浮窗", ovPerm); Chip("叠加层", ov)
             }
 
             Spacer(Modifier.height(4.dp))
@@ -102,7 +109,10 @@ fun Screen(vm: VM) {
             Step(3, "AI 实时分析", "构图评分+法则检测+建议", Icons.Default.AutoAwesome, ai, {
                 if (ai) vm.stopAnalysis() else vm.requestCapture()
             }, cap)
-            Step(4, "显示 AR 叠加层", "构图网格+评分+引导线", Icons.Default.Layers, ov, { vm.toggleOverlay() }, ai)
+            Step(4, "悬浮窗权限", "显示AR叠加层需要此权限", Icons.Default.Layers, ovPerm, {
+                vm.toggleOverlay()  // 会自动跳转到权限设置
+            }, true)
+            Step(5, "显示 AR 叠加层", "构图网格+评分+引导线", Icons.Default.Visibility, ov, { vm.toggleOverlay() }, ovPerm && ai)
 
             Spacer(Modifier.height(4.dp))
 

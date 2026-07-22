@@ -44,6 +44,7 @@ class VM(app: Application) : AndroidViewModel(app) {
     val a11y = MutableStateFlow(false)
     val capturing = MutableStateFlow(false)
     val analyzing = MutableStateFlow(false)
+    val overlayPermission = MutableStateFlow(false)
     val overlayVisible = MutableStateFlow(false)
     val autoExec = MutableStateFlow(true)
     val result = MutableStateFlow<CompositionResult?>(null)
@@ -52,6 +53,7 @@ class VM(app: Application) : AndroidViewModel(app) {
 
     fun setLauncher(l: ActivityResultLauncher<Intent>) { launcher = l }
     fun checkA11y() { a11y.value = A11yService.instance != null }
+    fun checkOverlayPerm() { overlayPermission.value = OverlayManager.hasPermission(ctx) }
 
     fun getAIStatus() = if (tfliteScorer.isAvailable) "🧠 TFLite + 算法混合" else "📊 纯算法"
 
@@ -129,8 +131,25 @@ class VM(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleOverlay() {
-        if (overlayVisible.value) { OverlayManager.hide(); overlayVisible.value = false }
-        else { OverlayManager.show(ctx); overlayVisible.value = true }
+        if (overlayVisible.value) {
+            OverlayManager.hide()
+            overlayVisible.value = false
+        } else {
+            // 检查权限
+            if (!OverlayManager.hasPermission(ctx)) {
+                status.value = "需要悬浮窗权限，请在设置中授予"
+                // 跳转到权限设置
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:" + ctx.packageName))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(intent)
+                } catch (_: Exception) {}
+                return
+            }
+            OverlayManager.show(ctx)
+            overlayVisible.value = true
+        }
     }
 
     fun cycleGuide() { OverlayManager.cycleGuide() }
