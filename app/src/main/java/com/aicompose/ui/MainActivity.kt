@@ -42,7 +42,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private lateinit var vm: VM
+    private var vmRef: VM? = null
+    private val vm: VM
+        get() = vmRef ?: throw IllegalStateException("VM not initialized")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,11 +54,12 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            vm = viewModel()
-            LaunchedEffect(Unit) { vm.setLauncher(captureLauncher) }
+            val vmInstance = viewModel<VM>()
+            vmRef = vmInstance
+            LaunchedEffect(Unit) { vmInstance.setLauncher(captureLauncher) }
 
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Screen(vm)
+                Screen(vmInstance)
             }
         }
     }

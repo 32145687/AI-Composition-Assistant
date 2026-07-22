@@ -14,6 +14,8 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.Log
@@ -21,7 +23,6 @@ import android.view.WindowManager
 import com.aicompose.App
 import com.aicompose.ui.MainActivity
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 屏幕捕获服务 — 稳定版
@@ -49,6 +50,7 @@ class CaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var projection: MediaProjection? = null
+    private var captureThread: HandlerThread? = null
     private var captureW = 540
     private var captureH = 960
 
@@ -97,6 +99,10 @@ class CaptureService : Service() {
         captureH = (metrics.heightPixels * scale).toInt()
         val dpi = metrics.densityDpi
 
+        // 在后台线程处理帧，避免阻塞主线程
+        captureThread = HandlerThread("CaptureThread").apply { start() }
+        val handler = Handler(captureThread!!.looper)
+
         imageReader = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 2)
 
         imageReader!!.setOnImageAvailableListener({ reader ->
@@ -106,7 +112,6 @@ class CaptureService : Service() {
             try {
                 val bitmap = imageToBitmap(image)
                 if (bitmap != null) {
-                    // 保持队列最多 2 帧
                     while (frameQueue.size >= 2) {
                         val old = frameQueue.poll()
                         old?.recycle()
@@ -118,7 +123,7 @@ class CaptureService : Service() {
             } finally {
                 image.close()
             }
-        }, null)
+        }, handler)  // 指定后台线程 Handler
 
         virtualDisplay = projection!!.createVirtualDisplay(
             "AICompose", captureW, captureH, dpi,
@@ -195,7 +200,8 @@ class CaptureService : Service() {
         imageReader = null
         projection?.stop()
         projection = null
-        // 清空队列
+        captureThread?.quitSafely()
+        captureThread = null
         while (frameQueue.isNotEmpty()) frameQueue.poll()?.recycle()
         super.onDestroy()
         Log.d(TAG, "屏幕捕获服务已销毁")

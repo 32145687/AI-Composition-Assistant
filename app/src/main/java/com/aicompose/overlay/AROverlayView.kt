@@ -101,10 +101,23 @@ class AROverlayView @JvmOverloads constructor(
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
         val w = width.toFloat(); val h = height.toFloat()
-        val r = result ?: return
+        val r = result
 
         // 场景运动偏移（AR 跟随）
         val ox = motionDx; val oy = motionDy
+
+        // 1. 引导线（始终绘制，即使没有分析结果）
+        drawGuide(c, w, h, ox, oy)
+
+        if (r == null) {
+            // 还没有分析结果时显示等待提示
+            val text = "等待 AI 分析..."
+            suggPaint.textSize = 22f
+            val tw = suggPaint.measureText(text)
+            c.drawRoundRect(w/2 - tw/2 - 14f, h - 150f, w/2 + tw/2 + 14f, h - 115f, 18f, 18f, bgPaint)
+            c.drawText(text, w/2, h - 125f, suggPaint)
+            return
+        }
 
         // 1. 引导线（跟随场景偏移）
         drawGuide(c, w, h, ox, oy)
