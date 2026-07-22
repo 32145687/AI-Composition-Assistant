@@ -34,6 +34,10 @@ object GestureExecutor {
         scope.launch {
             _lastAction.value = command
             try {
+                // 先设置回调，再执行手势（避免手势完成时回调还没设置）
+                val future = CompletableFuture<Boolean>()
+                svc.setGestureCallback { future.complete(it) }
+
                 when {
                     command.startsWith("zoom_in:") -> {
                         val amount = command.removePrefix("zoom_in:").toFloatOrNull() ?: 0.3f
@@ -48,9 +52,8 @@ object GestureExecutor {
                         if (parts.size == 2) svc.adjustParam(parts[0], parts[1].toIntOrNull() ?: 1)
                     }
                 }
+
                 // 等待手势完成
-                val future = CompletableFuture<Boolean>()
-                svc.setGestureCallback { future.complete(it) }
                 future.get(2, TimeUnit.SECONDS)
             } catch (e: Exception) {
                 Log.w(TAG, "手势异常: $command", e)

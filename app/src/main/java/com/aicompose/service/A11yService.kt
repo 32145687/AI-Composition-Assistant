@@ -36,6 +36,7 @@ class A11yService : AccessibilityService() {
         private set
 
     var lastGestureSuccess = false
+    @Volatile
     private var gestureCallback: ((Boolean) -> Unit)? = null
 
     override fun onServiceConnected() {
