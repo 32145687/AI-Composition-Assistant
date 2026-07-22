@@ -2,20 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 悬浮窗权限 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
-    <!-- 前台服务 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-
-    <!-- 震动反馈 -->
-    <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- 通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- 无障碍服务不需要 CAMERA 权限，因为我们用屏幕捕获 -->
 
     <application
         android:name=".App"
@@ -28,7 +18,6 @@
         android:largeHeap="true"
         tools:targetApi="34">
 
-        <!-- 主界面 -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -39,9 +28,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 无障碍服务 -->
         <service
-            android:name=".service.ComposeAccessibilityService"
+            android:name=".service.A11yService"
             android:exported="false"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -52,16 +40,10 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- 屏幕捕获前台服务 -->
         <service
-            android:name=".service.ScreenCaptureService"
+            android:name=".service.CaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
-
-        <!-- AI 分析服务 -->
-        <service
-            android:name=".service.AIAnalysisService"
-            android:exported="false" />
 
     </application>
 </manifest>
