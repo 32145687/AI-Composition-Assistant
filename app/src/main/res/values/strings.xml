@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AI构图助手</string>
+    <string name="accessibility_description">AI构图助手需要无障碍权限来模拟触控操作小米相机，实现自动构图调整。此服务仅在小米相机专业模式下工作，不会收集或上传任何数据。</string>
+</resources>

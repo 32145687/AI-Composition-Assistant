@@ -1,0 +1,4 @@
+-keep class org.tensorflow.** { *; }
+-dontwarn org.tensorflow.**
+-keep class com.aicompose.ai.** { *; }
+-keep class com.aicompose.service.** { *; }
