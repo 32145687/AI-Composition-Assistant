@@ -27,6 +27,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context: Context = application.applicationContext
 
+    // Activity 传入的 launcher（必须在 setContent 之后设置）
+    private var screenCaptureLauncher: ActivityResultLauncher<Intent>? = null
+
     // 服务状态
     private val _accessibilityEnabled = MutableStateFlow(false)
     val accessibilityEnabled: StateFlow<Boolean> = _accessibilityEnabled.asStateFlow()
@@ -59,6 +62,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Activity 注入 launcher（必须调用）
+     */
+    fun setScreenCaptureLauncher(launcher: ActivityResultLauncher<Intent>) {
+        screenCaptureLauncher = launcher
+    }
+
+    /**
      * 检查无障碍服务是否启用
      */
     fun checkAccessibilityStatus() {
@@ -76,37 +86,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 请求屏幕捕获权限
+     * 请求屏幕捕获权限（通过 Activity launcher）
      */
-    fun requestScreenCapture(launcher: ActivityResultLauncher<Intent>) {
-        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        launcher.launch(projectionManager.createScreenCaptureIntent())
-    }
-
-    /**
-     * 切换屏幕捕获状态
-     */
-    fun toggleCapture() {
-        if (_captureRunning.value) {
-            context.stopService(Intent(context, ScreenCaptureService::class.java))
-            _captureRunning.value = false
-            _statusMessage.value = "屏幕捕获已停止"
-        } else {
-            _statusMessage.value = "请从主界面开启屏幕捕获"
-        }
-    }
-
-    /**
-     * 屏幕捕获权限回调
-     */
-    fun onScreenCaptureResult(resultCode: Int, data: Intent?) {
-        if (data == null) {
-            _statusMessage.value = "屏幕捕获权限被拒绝"
+    fun requestScreenCapture() {
+        val launcher = screenCaptureLauncher
+        if (launcher == null) {
+            _statusMessage.value = "系统未就绪，请稍后重试"
+            Log.e(TAG, "screenCaptureLauncher 为 null，Activity 可能还没初始化")
             return
         }
 
         val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        launcher.launch(projectionManager.createScreenCaptureIntent())
+        _statusMessage.value = "请在弹窗中允许屏幕捕获"
+    }
+
+    /**
+     * 屏幕捕获权限回调（由 Activity 调用）
+     */
+    fun onScreenCaptureResult(resultCode: Int, data: Intent) {
+        Log.d(TAG, "屏幕捕获权限已获取, resultCode=$resultCode")
+
+        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val projection = projectionManager.getMediaProjection(resultCode, data)
+
+        if (projection == null) {
+            _statusMessage.value = "获取 MediaProjection 失败"
+            return
+        }
 
         ScreenCaptureService.setProjection(projection)
 
@@ -188,8 +195,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         aiService?.destroy()
         ComposeOverlayManager.getInstance(context).hide()
-
-        // 停止服务
         context.stopService(Intent(context, ScreenCaptureService::class.java))
     }
 }

@@ -7,6 +7,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 手势执行器
@@ -16,34 +17,29 @@ class GestureExecutor {
 
     companion object {
         private const val TAG = "GestureExecutor"
-        private const val MIN_COMMAND_INTERVAL_MS = 1500L  // 最小指令间隔
-        private const val MAX_RETRY = 2
+        private const val MIN_COMMAND_INTERVAL_MS = 1500L
+        private const val GESTURE_TIMEOUT_MS = 2000L
     }
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // 执行状态
     private val _state = MutableStateFlow(ExecutionState.IDLE)
     val state: StateFlow<ExecutionState> = _state.asStateFlow()
 
-    // 最近执行的指令
     private val _lastAction = MutableStateFlow<String?>(null)
     val lastAction: StateFlow<String?> = _lastAction.asStateFlow()
 
-    // 执行统计
-    private var totalExecutions = 0
-    private var lastExecutionTime = 0L
+    // 用 AtomicLong 避免跨线程读写问题
+    private val totalExecutions = AtomicLong(0)
+    private val lastExecutionTime = AtomicLong(0L)
+
+    // 当前手势的 CompletableDeferred，修复回调竞态
+    private var currentGestureDeferred: CompletableDeferred<Boolean>? = null
 
     enum class ExecutionState {
-        IDLE,       // 空闲
-        EXECUTING,  // 执行中
-        COOLDOWN,   // 冷却中
-        DISABLED    // 已禁用
+        IDLE, EXECUTING, COOLDOWN, DISABLED
     }
 
-    /**
-     * 执行 AI 分析结果中的指令
-     */
     fun executeCommands(result: CompositionEngine.AnalysisResult) {
         val service = ComposeAccessibilityService.instance
         if (service == null) {
@@ -58,7 +54,7 @@ class GestureExecutor {
 
         // 节流检查
         val now = System.currentTimeMillis()
-        if (now - lastExecutionTime < MIN_COMMAND_INTERVAL_MS) {
+        if (now - lastExecutionTime.get() < MIN_COMMAND_INTERVAL_MS) {
             Log.d(TAG, "冷却中，跳过执行")
             _state.value = ExecutionState.COOLDOWN
             return
@@ -72,36 +68,42 @@ class GestureExecutor {
                     Log.d(TAG, "执行指令: ${command.describe()}")
                     _lastAction.value = command.describe()
 
+                    // 为每次手势创建独立的 CompletableDeferred，避免竞态
+                    val deferred = CompletableDeferred<Boolean>()
+                    currentGestureDeferred = deferred
+
+                    // 设置回调，将结果通知到 deferred
+                    service.onGestureCompleted = { success ->
+                        deferred.complete(success)
+                    }
+
+                    // 执行手势
                     service.executeCommand(command)
 
-                    // 等待手势完成
-                    withContext(Dispatchers.Default) {
-                        val completed = suspendCancellableCoroutine<Boolean> { cont ->
-                            service.onGestureCompleted = { success ->
-                                cont.resume(success) {}
-                            }
-                            // 超时保护
-                            scope.launch {
-                                delay(2000)
-                                if (cont.isActive) cont.resume(false) {}
-                            }
-                        }
+                    // 带超时等待手势完成
+                    val completed = withTimeoutOrNull(GESTURE_TIMEOUT_MS) {
+                        deferred.await()
+                    } ?: false
 
-                        if (!completed) {
-                            Log.w(TAG, "手势执行失败: ${command.describe()}")
-                        }
+                    currentGestureDeferred = null
+
+                    if (!completed) {
+                        Log.w(TAG, "手势执行失败或超时: ${command.describe()}")
                     }
 
                     // 指令间间隔
                     delay(300)
 
+                } catch (e: CancellationException) {
+                    Log.d(TAG, "指令被取消: ${command.describe()}")
+                    throw e  // CancellationException 必须重新抛出
                 } catch (e: Exception) {
                     Log.e(TAG, "指令执行异常: ${command.describe()}", e)
                 }
             }
 
-            lastExecutionTime = System.currentTimeMillis()
-            totalExecutions++
+            lastExecutionTime.set(System.currentTimeMillis())
+            totalExecutions.incrementAndGet()
             _state.value = ExecutionState.IDLE
 
             // 3秒后清除动作提示
@@ -112,24 +114,19 @@ class GestureExecutor {
         }
     }
 
-    /**
-     * 禁用/启用自动执行
-     */
     fun setEnabled(enabled: Boolean) {
         _state.value = if (enabled) ExecutionState.IDLE else ExecutionState.DISABLED
     }
 
     fun isEnabled(): Boolean = _state.value != ExecutionState.DISABLED
 
-    fun getStats(): String = "已执行 $totalExecutions 次调整"
+    fun getStats(): String = "已执行 ${totalExecutions.get()} 次调整"
 
     fun destroy() {
+        currentGestureDeferred?.cancel()
         scope.cancel()
     }
 
-    /**
-     * 指令描述（用于 UI 显示）
-     */
     private fun ComposeAccessibilityService.ComposeCommand.describe(): String {
         return when (this) {
             is ComposeAccessibilityService.ComposeCommand.ZoomIn ->

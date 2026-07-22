@@ -171,12 +171,13 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onDestroy() {
-        serviceScope.cancel()
         virtualDisplay?.release()
         imageReader?.close()
         mediaProjection?.stop()
         mediaProjection = null
-        serviceScope.launch { isCapturing.emit(false) }
+        serviceScope.cancel()
+        // scope 已取消，用 tryEmit 替代 launch
+        isCapturing.tryEmit(false)
         super.onDestroy()
         Log.d(TAG, "屏幕捕获服务已销毁")
     }

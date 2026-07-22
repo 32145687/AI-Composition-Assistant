@@ -37,6 +37,19 @@ import com.aicompose.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
+    // ViewModel 需要在 Activity 级别持有 launcher，因为 MediaProjection 权限必须通过 Activity 请求
+    private lateinit var viewModel: MainViewModel
+
+    // 屏幕捕获权限请求
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            viewModel.onScreenCaptureResult(result.resultCode, result.data!!)
+        }
+    }
+
+    // 通知权限请求
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
@@ -50,10 +63,17 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            viewModel = viewModel()
+
+            // 把 launcher 注册到 ViewModel，这样 Composable 里就能触发
+            LaunchedEffect(Unit) {
+                viewModel.setScreenCaptureLauncher(screenCaptureLauncher)
+            }
+
             MaterialTheme(
                 colorScheme = darkColorScheme()
             ) {
-                MainScreen()
+                MainScreen(viewModel = viewModel)
             }
         }
     }
@@ -161,7 +181,7 @@ fun MainScreen(
                 icon = Icons.Default.ScreenShare,
                 isEnabled = captureRunning,
                 buttonText = if (captureRunning) "运行中 ✓" else "开启",
-                onClick = { viewModel.toggleCapture() },
+                onClick = { viewModel.requestScreenCapture() },
                 enabled = accessibilityEnabled
             )
 
