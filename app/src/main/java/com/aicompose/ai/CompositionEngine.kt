@@ -44,7 +44,7 @@ enum class SceneType(val label: String, val icon: String) {
 /**
  * AI 构图引擎 — 混合方案：算法 + 启发式规则
  */
-class CompositionEngine {
+class CompositionEngine(private val tfliteScorer: TFLiteScorer? = null) {
 
     private var lastScore = 50f
 
@@ -81,11 +81,21 @@ class CompositionEngine {
         rules.add(checkHorizon(pixels, w, h))
         rules.add(checkDepth(pixels, w, h))
 
-        // 4. 加权总分
+        // 5. 算法总分
         val weights = floatArrayOf(0.22f, 0.13f, 0.12f, 0.13f, 0.10f, 0.10f, 0.10f, 0.10f)
-        var total = 0f
-        for (i in rules.indices) total += rules[i].score * weights[i]
-        total = (total * 100).coerceIn(0f, 100f)
+        var algoScore = 0f
+        for (i in rules.indices) algoScore += rules[i].score * weights[i]
+        algoScore = (algoScore * 100).coerceIn(0f, 100f)
+
+        // 6. TFLite 深度学习评分（如果可用）
+        val dlScore = tfliteScorer?.score(bitmap)
+
+        // 7. 融合分数: 有模型时 DL60% + 算法40%，无模型时纯算法
+        var total = if (dlScore != null) {
+            dlScore * 0.6f + algoScore * 0.4f
+        } else {
+            algoScore
+        }
 
         // 场景加分
         if (scene == SceneType.LANDSCAPE && rules[3].score > 0.6f) total += 5f

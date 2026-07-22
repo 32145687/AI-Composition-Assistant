@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicompose.ai.CompositionEngine
 import com.aicompose.ai.CompositionResult
+import com.aicompose.ai.TFLiteScorer
 import com.aicompose.gesture.GestureExecutor
 import com.aicompose.overlay.OverlayManager
 import com.aicompose.service.A11yService
@@ -30,7 +31,8 @@ class VM(app: Application) : AndroidViewModel(app) {
     }
 
     private val ctx: Context = app.applicationContext
-    private val engine = CompositionEngine()
+    private val tfliteScorer = TFLiteScorer(ctx)
+    private val engine = CompositionEngine(tfliteScorer)
     private var launcher: ActivityResultLauncher<Intent>? = null
 
     // 状态
@@ -46,6 +48,10 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun setLauncher(l: ActivityResultLauncher<Intent>) { launcher = l }
 
     fun checkA11y() { a11y.value = A11yService.instance != null }
+
+    fun getAIStatus(): String {
+        return if (tfliteScorer.isAvailable) "🧠 TFLite 深度学习 + 算法混合" else "📊 纯算法分析（放入模型文件启用DL）"
+    }
 
     fun openA11ySettings() {
         ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
